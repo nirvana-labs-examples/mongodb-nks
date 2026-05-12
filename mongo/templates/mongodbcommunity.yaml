@@ -1,0 +1,55 @@
+apiVersion: mongodbcommunity.mongodb.com/v1
+kind: MongoDBCommunity
+metadata:
+  name: {{ .Values.replicaSet.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.replicaSet.name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  members: {{ .Values.replicaSet.members }}
+  type: ReplicaSet
+  version: {{ .Values.replicaSet.version | quote }}
+  security:
+    authentication:
+      modes: ["SCRAM"]
+  users:
+    - name: {{ .Values.auth.username }}
+      db: admin
+      passwordSecretRef:
+        name: {{ .Values.auth.existingSecret }}
+        key: {{ .Values.auth.existingSecretPasswordKey }}
+      # SCRAM creds the operator derives on first reconcile. Suffixed
+      # "-scram-credentials" by the operator and stored as a separate
+      # Secret so the bootstrap password can be safely deleted per the
+      # vendor's Next Steps doc.
+      scramCredentialsSecretName: {{ .Values.replicaSet.name }}-{{ .Values.auth.username }}-scram
+      roles:
+        - name: root
+          db: admin
+  statefulSet:
+    spec:
+      # Soft anti-affinity so members spread across nodes when possible
+      # but the install still schedules on clusters with fewer worker
+      # nodes than replica-set members.
+      template:
+        spec:
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        app: {{ .Values.replicaSet.name }}-svc
+                    topologyKey: kubernetes.io/hostname
+      volumeClaimTemplates:
+        - metadata:
+            name: data-volume
+          spec:
+            accessModes: [ReadWriteOnce]
+            {{- with .Values.persistence.storageClass }}
+            storageClassName: {{ . | quote }}
+            {{- end }}
+            resources:
+              requests:
+                storage: {{ .Values.persistence.size }}
