@@ -94,7 +94,7 @@ flowchart LR
 
    The operator takes ~2–3 minutes after `helm_release` returns to elect a primary and generate the connection-string Secret. If the first apply finishes before the Secret is generated, re-run `terraform apply` once.
 
-6. **Test the connection** — `terraform output` prints a one-liner that spins up an ephemeral `mongosh` pod and runs `db.runCommand({hello: 1})` against the replica set:
+6. **Verify** — see [Connecting from in-cluster pods](#connecting-from-in-cluster-pods) below for the canonical retrieve-and-smoke-test flow. The Terraform path also exposes a convenience output:
 
    ```bash
    export KUBECONFIG=$(terraform output -raw kubeconfig_path)
@@ -104,17 +104,31 @@ flowchart LR
 
 ## Connecting from in-cluster pods
 
-The operator auto-generates a connection-string Secret with the canonical URI:
+The operator auto-generates a connection-string Secret (`mongo-admin-admin`) with the canonical URI. The URI embeds the password, so this is the authoritative retrieval surface regardless of how you installed (Terraform / manual helm / ArgoCD) — it remains valid even after the bootstrap `mongo-admin` Secret is deleted per the vendor's [Next Steps](https://github.com/mongodb/mongodb-kubernetes/blob/main/docs/mongodbcommunity/users.md#next-steps).
+
+Retrieve:
 
 ```bash
 kubectl get secret mongo-admin-admin -n mongo \
   -o jsonpath='{.data.connectionString\.standard}' | base64 -d
 ```
 
-Consume it as `envFrom` / a volume mount in your application pods. The driver does replica-set discovery via the headless Service:
+The URI looks like:
 
 ```
 mongodb://admin:<pwd>@mongo-0.mongo-svc.mongo.svc.cluster.local:27017,mongo-1.mongo-svc...:27017,mongo-2.mongo-svc...:27017/admin?replicaSet=mongo&ssl=false
+```
+
+Consume it as `envFrom` / a volume mount in your application pods — the driver does replica-set discovery via the headless Service automatically.
+
+Smoke test with an ephemeral `mongosh` pod:
+
+```bash
+URI=$(kubectl get secret mongo-admin-admin -n mongo \
+  -o jsonpath='{.data.connectionString\.standard}' | base64 -d)
+kubectl run -it --rm mongosh --image=mongo:8.0 --restart=Never -- \
+  mongosh "$URI" --eval 'db.runCommand({hello: 1})'
+# expect: { isWritablePrimary: true, ... members: 3 ... }
 ```
 
 ## Why in-cluster only
@@ -130,21 +144,43 @@ For a simpler off-cluster path, run a VPN into the VPC + DNS forwarding for `*.s
 
 ### Manual helm (any cluster)
 
-Install the vendor's operator chart directly, then write your own `MongoDBCommunity` CR per the vendor's Quick Start:
+Install the vendor's operator chart directly, pre-create the admin Secret, then apply your own `MongoDBCommunity` CR per the vendor's Quick Start:
 
 ```bash
+# 1. Install the MCK operator
 helm repo add mongodb https://mongodb.github.io/helm-charts
-helm install mongo-operator mongodb/mongodb-kubernetes -n mongo --create-namespace
-# then apply a MongoDBCommunity CR — see
-# https://github.com/mongodb/mongodb-kubernetes/blob/main/docs/community-search/quick-start.md
+kubectl create namespace mongo
+helm install mongo-operator mongodb/mongodb-kubernetes -n mongo
+
+# 2. Pre-create the admin password Secret (the MongoDBCommunity CR's
+#    users[].passwordSecretRef will reference it). MCK does not auto-
+#    generate passwords — this is the vendor-recommended path; see
+#    https://github.com/mongodb/mongodb-kubernetes/blob/main/docs/mongodbcommunity/users.md
+kubectl create secret generic mongo-admin -n mongo \
+  --from-literal=password=$(openssl rand -hex 16)
+
+# 3. Apply a MongoDBCommunity CR — see vendor Quick Start for a sample:
+#    https://github.com/mongodb/mongodb-kubernetes/blob/main/docs/community-search/quick-start.md
 ```
+
+After the replica set reaches `Phase: Running`, retrieve the connection string and verify per [Connecting from in-cluster pods](#connecting-from-in-cluster-pods). MongoDB recommends deleting the bootstrap `mongo-admin` Secret at that point — the operator caches SCRAM credentials internally and no longer needs the plaintext password (see [Next Steps](https://github.com/mongodb/mongodb-kubernetes/blob/main/docs/mongodbcommunity/users.md#next-steps)). The connection-string Secret (`mongo-admin-admin`) persists, so retrieval keeps working.
 
 ### Existing ArgoCD installation
 
 If you already followed [nirvana-labs-examples/argocd-gitops-nks](https://github.com/nirvana-labs-examples/argocd-gitops-nks), adding MongoDB is a copy-and-push:
 
 1. Copy `mongo/` from this repo into `argocd/mongo/` in your argocd-gitops-nks fork.
-2. Pre-create the `mongo-admin` Secret in the `mongo` namespace (the MongoDBCommunity CR's `users[].passwordSecretRef` references it), or wire it via your secrets pipeline — sealed-secrets, ESO, etc.
+
+2. Pre-create the admin Secret in the `mongo` namespace (the `MongoDBCommunity` CR's `users[].passwordSecretRef` references it — MCK does not auto-generate passwords; this is the [vendor-recommended pattern](https://github.com/mongodb/mongodb-kubernetes/blob/main/docs/mongodbcommunity/users.md#create-a-user-secret)):
+
+   ```bash
+   kubectl create namespace mongo
+   kubectl create secret generic mongo-admin -n mongo \
+     --from-literal=password=$(openssl rand -hex 16)
+   ```
+
+   For production, replace the manual `kubectl create secret` with your secrets pipeline (sealed-secrets, ESO, etc.) — the operator only needs the Secret to exist with key `password` before reconciliation. Per the vendor's [Next Steps](https://github.com/mongodb/mongodb-kubernetes/blob/main/docs/mongodbcommunity/users.md#next-steps), the bootstrap Secret can be deleted after the cluster reaches `Phase: Running`. Once reconciled, retrieve the connection string and verify per [Connecting from in-cluster pods](#connecting-from-in-cluster-pods).
+
 3. Commit and push.
 
 The `workloads` ApplicationSet in argocd-gitops-nks auto-discovers the new directory and generates an `Application` for it on its next refresh (~3 minutes by default).

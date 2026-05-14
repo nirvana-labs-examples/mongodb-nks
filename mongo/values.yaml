@@ -1,0 +1,32 @@
+# MCK operator subchart values, passed through to mongodb-kubernetes.
+# Defaults install the operator into this chart's release namespace where
+# it reconciles MongoDBCommunity resources in the same namespace.
+mongodb-kubernetes: {}
+
+replicaSet:
+  # Name of the MongoDBCommunity CR. Drives the StatefulSet name, the
+  # headless Service DNS, per-pod hostnames, and the operator-generated
+  # connection-string Secret name (<replicaSet.name>-<authdb>-<username>).
+  # Don't change after the first install.
+  name: mongo
+  # Replica-set member count. 3 is the vendor-recommended minimum for a
+  # production-shaped deployment.
+  members: 3
+  # MongoDB server version.
+  version: "8.0.4"
+
+auth:
+  # Username of the admin user the operator provisions on first reconcile.
+  username: admin
+  # Name of an externally-managed Secret holding the admin password.
+  # The MongoDBCommunity CR references this via users[].passwordSecretRef.
+  # MCK requires the Secret to exist before reconciliation — see the
+  # repo README for the supported create-Secret paths.
+  existingSecret: mongo-admin
+  existingSecretPasswordKey: password
+
+persistence:
+  # Leave empty to use the cluster's default StorageClass.
+  storageClass: ""
+  # Per-member data volume size; total cluster storage = size × members.
+  size: 20Gi

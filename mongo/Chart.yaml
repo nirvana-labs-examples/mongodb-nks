@@ -1,0 +1,10 @@
+apiVersion: v2
+name: mongo
+description: Wrapper chart deploying the MongoDB Controllers for Kubernetes (MCK) operator plus a MongoDBCommunity replica set for the mongodb-nks starter example.
+type: application
+version: 0.1.0
+appVersion: "8.0"
+dependencies:
+  - name: mongodb-kubernetes
+    version: "1.8.0"
+    repository: "https://mongodb.github.io/helm-charts"
