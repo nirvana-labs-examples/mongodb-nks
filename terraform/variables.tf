@@ -24,7 +24,7 @@ variable "node_count" {
 variable "instance_type" {
   description = "Worker instance type."
   type        = string
-  default     = "n1-standard-4"
+  default     = "n1-highcpu-2"
 }
 
 variable "fetch_kubeconfig" {
