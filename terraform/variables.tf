@@ -15,6 +15,12 @@ variable "cluster_name" {
   default     = "mongodb-nks-demo"
 }
 
+variable "kubernetes_version" {
+  description = "Kubernetes version for the cluster. Changing this value recreates the cluster — there is no in-place upgrade."
+  type        = string
+  default     = "v1.34.4"
+}
+
 variable "node_count" {
   description = "Worker node count (single pool). Defaulted to 3 so soft pod anti-affinity can spread replica-set members across nodes."
   type        = number
