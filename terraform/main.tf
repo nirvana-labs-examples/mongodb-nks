@@ -1,9 +1,11 @@
 module "nks" {
-  source = "git::https://github.com/nirvana-labs/terraform-nirvana-nks.git?ref=main"
+  source  = "nirvana-labs/nks/nirvana"
+  version = "~> 0.2.0"
 
-  cluster_name = var.cluster_name
-  project_id   = var.project_id
-  region       = var.region
+  cluster_name       = var.cluster_name
+  kubernetes_version = var.kubernetes_version
+  project_id         = var.project_id
+  region             = var.region
 
   node_pools = {
     default = {
