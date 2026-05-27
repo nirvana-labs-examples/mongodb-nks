@@ -26,6 +26,7 @@ locals {
 # from the target namespace first, which fails when secret access is
 # namespace-scoped.
 resource "kubernetes_namespace" "mongo" {
+  depends_on = [module.nks]
   metadata {
     name = "mongo"
   }
